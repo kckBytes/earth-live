@@ -49,7 +49,10 @@ def mosaic(name, base=None):
     img = np.zeros((H, W, 4), np.uint8)
     for f in glob.glob(f'{base or D}/{name}/*.png'):
         r, c = map(int, re.findall(r'(\d+)_(\d+)\.png', f)[0])
-        t = np.array(Image.open(f).convert('RGBA'))
+        try:
+            t = np.array(Image.open(f).convert('RGBA'))
+        except Exception:                                # an error page instead of a tile: treat as no data
+            continue
         y0, x0 = r * 512, c * 512
         hh, ww = min(512, H - y0), min(512, W - x0)
         if hh > 0 and ww > 0: img[y0:y0 + hh, x0:x0 + ww] = t[:hh, :ww]
@@ -77,7 +80,11 @@ def grey(name):
     import os
     if not os.path.exists(f'{D}/{name}.png'):
         return np.full((H, W), np.nan, np.float32)
-    a = np.array(Image.open(f'{D}/{name}.png').convert('RGBA'))
+    try:
+        a = np.array(Image.open(f'{D}/{name}.png').convert('RGBA'))
+    except Exception:                                    # e.g. a WMS error document for a missing time
+        log(f'{name}: unreadable, skipped')
+        return np.full((H, W), np.nan, np.float32)
     g = np.full((H, W), np.nan, np.float32); ok = a[..., 3] > 0; g[ok] = a[..., 0][ok]
     return g
 
