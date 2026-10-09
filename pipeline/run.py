@@ -65,6 +65,23 @@ for t, p in hist:
     age = (obs_ms - t) / 3.6e6
     if 0.66 <= age <= 2.0 and (best is None or abs(age - 1.0) < abs(best[0] - 1.0)):
         best = (age, p)
+if best is None:
+    # No stored map ~1 h old (first run, or the schedule skipped): the satellites' archives keep past frames,
+    # so fetch and stitch the slot one hour earlier right now instead of waiting.
+    from datetime import timedelta
+    back = {k: (v - timedelta(hours=1) if v else None) for k, v in times.items()}
+    obs_b = obs - timedelta(hours=1)
+    print('backfilling the map from one hour earlier:', obs_b.strftime('%H:%M'))
+    shutil.rmtree(SLOT, ignore_errors=True)
+    fetch_slot.download(back, SLOT, STATIC)
+    try:
+        subprocess.run([sys.executable, f'{HERE}/stitch.py', SLOT, obs_b.strftime('%Y-%m-%dT%H:%MZ'), day_tex, polar,
+                        f'{WORK}/back', STATIC], check=True)
+        p = f'{HIST}/{int(obs_b.timestamp() * 1000)}.png'
+        shutil.copy(f'{WORK}/back_512.png', p)
+        best = (1.0, p)
+    except subprocess.CalledProcessError as e:
+        print('backfill failed:', e)
 if best:
     older = np.array(Image.open(best[1]).convert('L'), np.float32) / 255
     fl = flow.estimate(older, small, best[0])
