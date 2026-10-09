@@ -3,6 +3,10 @@ on:
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
+    inputs:
+      backfill:
+        description: 'replay frames to backfill from the archives (48 = a full day)'
+        default: '2'
 permissions:
   contents: read
   pages: write
@@ -13,7 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,6 +33,9 @@ jobs:
           restore-keys: state-
       - name: fetch, stitch, measure motion
         run: python pipeline/run.py work site
+        env:
+          BACKFILL: ${{ github.event.inputs.backfill || '2' }}
+          PARALLEL: '3'
       - name: save state
         uses: actions/cache/save@v4
         if: always()
