@@ -37,7 +37,7 @@ obs_ms = int(obs.timestamp() * 1000)
 prev_meta = {}
 if os.path.exists(f'{WORK}/last_meta.json'):
     prev_meta = json.load(open(f'{WORK}/last_meta.json'))
-if prev_meta.get('time') == obs_ms and os.path.exists(f'{WORK}/last/clouds_4096.jpg'):
+if prev_meta.get('time') == obs_ms and prev_meta.get('flow_hours', 0) > 0 and os.path.exists(f'{WORK}/last/clouds_4096.jpg'):
     print('no newer frames than last run; republishing')
     for f in glob.glob(f'{WORK}/last/*'): shutil.copy(f, SITE)
     sys.exit(0)
