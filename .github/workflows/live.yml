@@ -1,0 +1,51 @@
+name: live clouds
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: live
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: restore state (reference layers + 26 h of small maps)
+        uses: actions/cache/restore@v4
+        with:
+          path: work
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+      - name: fetch, stitch, measure motion
+        run: python pipeline/run.py work site
+      - name: save state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: work
+          key: state-${{ github.run_id }}
+      - name: page
+        run: cp index.html site/ && touch site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

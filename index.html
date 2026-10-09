@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earth live clouds</title>
+<style>:root{color-scheme:dark}body{margin:0;background:#000;color:#ddd;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:16px;max-width:900px;margin:auto}img{width:100%;border-radius:8px}code{color:#9cf}</style></head>
+<body><h1>Earth: live global clouds</h1>
+<p id="t">Loading…</p><img src="clouds_2048.jpg" alt="Latest global cloud map">
+<p>Five geostationary satellites (GOES-East, GOES-West, Himawari, Meteosat MTG 0°, Meteosat Indian Ocean), stitched every 10 minutes:
+infrared cloud-top temperature against a terrain-corrected and sea-surface-temperature clear-sky reference, plus visible light by day for low clouds.
+Files: <code>clouds_4096.jpg</code>, <code>clouds_2048.jpg</code>, <code>flow.png</code> (motion), <code>meta.json</code>. Used by <a href="https://kckbytes.github.io/earth-web/">Earth</a>.</p>
+<p><small>Contains modified EUMETSAT data. NASA GIBS (GOES via NOAA, Himawari via JMA). GHRSST MUR sea-surface temperature. SRTM elevation.</small></p>
+<script>fetch('meta.json',{cache:'no-cache'}).then(r=>r.json()).then(m=>{const a=Math.round((Date.now()-m.time)/60000);document.getElementById('t').textContent='Observed '+new Date(m.time).toLocaleString()+' ('+a+' min ago)';});</script>
+</body></html>
