@@ -241,6 +241,15 @@ img = Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8))
 img.resize((4096, 2048), Image.LANCZOS).save(f'{OUT}_4096.jpg', quality=90)
 img.resize((2048, 1024), Image.LANCZOS).save(f'{OUT}_2048.jpg', quality=90)
 img.resize((512, 256), Image.BOX).save(f'{OUT}_512.png')
+# data layers for the other globe views
+# infrared: cloud-top / surface temperature, 0 = no data, 1..255 = -90..+50 C
+bt8 = np.where(np.isfinite(BT), 1 + np.clip((BT + 90) / 140 * 254, 0, 254), 0).astype(np.uint8)
+bimg = Image.fromarray(bt8)
+bimg.resize((4096, 2048), Image.BILINEAR).save(f'{OUT}_bt_4096.jpg', quality=90)
+bimg.resize((2048, 1024), Image.BILINEAR).save(f'{OUT}_bt_2048.jpg', quality=90)
+# sea-surface temperature: 0 = land/ice/no data, 1..255 = -2..+35 C
+sst8 = np.where(SEA, 1 + np.clip((sst + 2) / 37 * 254, 0, 254), 0).astype(np.uint8)
+Image.fromarray(sst8).resize((2048, 1024), Image.NEAREST).save(f'{OUT}_sst_2048.png', optimize=True)
 # diagnostics
 def q(a): return Image.fromarray((np.clip(np.nan_to_num(a), 0, 1) * 255).astype(np.uint8)).resize((1280, 640))
 q(ir).save(f'{OUT}_dbg_ir.png'); q(vcl * dayw).save(f'{OUT}_dbg_vis.png')
