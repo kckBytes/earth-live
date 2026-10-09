@@ -6,7 +6,7 @@ on:
     inputs:
       backfill:
         description: 'replay frames to backfill from the archives (48 = a full day)'
-        default: '2'
+        default: '12'
 permissions:
   contents: read
   pages: write
@@ -34,7 +34,7 @@ jobs:
       - name: fetch, stitch, measure motion
         run: python pipeline/run.py work site
         env:
-          BACKFILL: ${{ github.event.inputs.backfill || '2' }}
+          BACKFILL: ${{ github.event.inputs.backfill || '12' }}
           PARALLEL: '3'
       - name: save state
         uses: actions/cache/save@v4

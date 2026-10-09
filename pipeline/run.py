@@ -1,6 +1,6 @@
 """One pipeline run: newest frames from five satellites -> stitched global maps + motion -> site/.
 
-  python pipeline/run.py <work dir> <site dir>        (env BACKFILL = how many missing replay frames to add, default 2)
+  python pipeline/run.py <work dir> <site dir>        (env BACKFILL = how many missing replay frames to add, default 12)
 
 work dir is kept between runs (Actions cache): reference layers, 26 h of small maps for motion, and the
 replay frames (one every 30 min for the last 24 h, backfilled from the satellite archives).
@@ -23,7 +23,7 @@ sys.path.insert(0, HERE)
 import fetch_slot, flow
 
 WORK, SITE = sys.argv[1], sys.argv[2]
-BACKFILL = int(os.environ.get('BACKFILL', '2') or 2)
+BACKFILL = int(os.environ.get('BACKFILL', '12') or 12)
 PARALLEL = int(os.environ.get('PARALLEL', '3') or 3)
 STATIC, HIST, FR = f'{WORK}/static', f'{WORK}/history', f'{WORK}/frames'
 for d in (WORK, SITE, HIST, FR, STATIC): os.makedirs(d, exist_ok=True)
