@@ -226,7 +226,7 @@ json.dump({'frames': [dict({'t': t, 'v': int(os.path.getmtime(f'{FR}/{t}_c.jpg')
                       for t in ft], 'every_min': 30, 'kinds': ['c', 'bt'], 'activity_grid': [8, 4]},
           open(f'{SITE}/frames.json', 'w'))
 try:
-    json.dump(storms.fetch(), open(f'{SITE}/storms.json', 'w'))
+    json.dump(storms.fetch_all(cache_dir=WORK), open(f'{SITE}/storms.json', 'w'))
 except Exception as e:
     print('storms failed:', e); json.dump({'generated': int(time.time() * 1000), 'storms': []}, open(f'{SITE}/storms.json', 'w'))
 json.dump(meta, open(f'{SITE}/meta.json', 'w'), indent=1)
