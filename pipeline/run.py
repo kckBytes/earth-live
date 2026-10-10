@@ -10,6 +10,7 @@ Published (site/):
   sst_2048.png                       sea-surface temperature: 0 = land/ice, 1..255 = -2..+35 C (daily)
   flow.png                           64x32 RG motion, deg/hour (R east, G north), 128 = still
   meta.json                          observation time etc.
+  storms.json                        active tropical cyclones with tracks (GDACS + NOAA NHC)
   frames.json + frames/<t>_c.jpg, <t>_bt.jpg, <t>_f.png   replay: last 24 h, every 30 min, f = motion to next frame
 
 Replay frames sit on an exact 30-minute grid (all from the archives, so every satellite is at the same moment).
@@ -26,7 +27,7 @@ from scipy import ndimage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import fetch_slot, flow
+import fetch_slot, flow, storms
 
 WORK, SITE = sys.argv[1], sys.argv[2]
 BACKFILL = int(os.environ.get('BACKFILL', '12') or 12)
@@ -215,8 +216,19 @@ ft = [t for t in ft if ft[-1] - t <= PUB_H * H + 60e3]
 for t in ft:
     for k in ('c.jpg', 'bt.jpg', 'f.png'):
         if os.path.exists(f'{FR}/{t}_{k}'): shutil.copy(f'{FR}/{t}_{k}', f'{SITE}/frames/{t}_{k}')
-json.dump({'frames': [{'t': t, 'v': int(os.path.getmtime(f'{FR}/{t}_c.jpg') * 1000)} for t in ft],
-           'every_min': 30, 'kinds': ['c', 'bt']}, open(f'{SITE}/frames.json', 'w'))
+# how much the clouds change from each frame to the next, on an 8 x 4 grid of the world (lon x lat, x1000):
+# the phone slows the replay down where the half of the Earth it shows is busy, and speeds through calm spells
+act = {}
+for a, b in zip(ft, ft[1:]):
+    d = np.abs(small(f'{FR}/{b}_s.png') - small(f'{FR}/{a}_s.png'))
+    act[a] = [int(round(v * 1000)) for v in d.reshape(4, 64, 8, 64).mean(axis=(1, 3)).ravel()]
+json.dump({'frames': [dict({'t': t, 'v': int(os.path.getmtime(f'{FR}/{t}_c.jpg') * 1000)}, **({'a': act[t]} if t in act else {}))
+                      for t in ft], 'every_min': 30, 'kinds': ['c', 'bt'], 'activity_grid': [8, 4]},
+          open(f'{SITE}/frames.json', 'w'))
+try:
+    json.dump(storms.fetch(), open(f'{SITE}/storms.json', 'w'))
+except Exception as e:
+    print('storms failed:', e); json.dump({'generated': int(time.time() * 1000), 'storms': []}, open(f'{SITE}/storms.json', 'w'))
 json.dump(meta, open(f'{SITE}/meta.json', 'w'), indent=1)
 span = (ft[-1] - ft[0]) / H if len(ft) > 1 else 0
 print(f'published {meta.get("time_iso")}; replay {len(ft)} frames over {span:.1f} h; run took {time.time() - t_start:.0f}s')
