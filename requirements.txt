@@ -2,3 +2,5 @@ numpy
 pillow
 scipy
 eccodes
+sgp4
+netCDF4

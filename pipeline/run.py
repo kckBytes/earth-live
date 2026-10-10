@@ -28,7 +28,7 @@ from scipy import ndimage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import fetch_slot, flow, storms, weather
+import fetch_slot, flow, storms, weather, sky
 
 WORK, SITE = sys.argv[1], sys.argv[2]
 BACKFILL = int(os.environ.get('BACKFILL', '12') or 12)
@@ -226,6 +226,10 @@ for a, b in zip(ft, ft[1:]):
 json.dump({'frames': [dict({'t': t, 'v': int(os.path.getmtime(f'{FR}/{t}_c.jpg') * 1000)}, **({'a': act[t]} if t in act else {}))
                       for t in ft], 'every_min': 30, 'kinds': ['c', 'bt'], 'activity_grid': [8, 4]},
           open(f'{SITE}/frames.json', 'w'))
+try:
+    sky.build(WORK, SITE)                                    # stations, camera satellites, aurora, fires, lightning
+except Exception as e:
+    print('sky failed:', e)
 try:
     weather.build(WORK, SITE)                                # Ventusky-style layers, only when a new model run is out
 except Exception as e:
