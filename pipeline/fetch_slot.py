@@ -111,6 +111,19 @@ def download(times, out, static_dir):
     with cf.ThreadPoolExecutor(16) as ex:
         res = list(ex.map(lambda j: fetch(*j), jobs))
     got = sum(len(r) for r in res if r)
+    # GIBS publishes a new time tile by tile: the newest slot can be missing whole 36-degree tiles, which
+    # showed as rectangular patches. If any tile of a layer is missing, take that layer 10 min earlier.
+    for k, (layer, tms) in GIBS_LAYERS.items():
+        for back in range(3):
+            if not times.get(k): break
+            missing = [(r, c) for r in range(5) for c in range(10) if not os.path.exists(f'{out}/{k}/{r}_{c}.png')]
+            if not missing: break
+            times[k] = times[k] - timedelta(minutes=10)
+            print(f'   {k}: {len(missing)} tiles not published yet, using {times[k].strftime("%H:%M")}')
+            sub = [(GIBS.format(layer=layer, t=iso(times[k]), tms=tms, r=r, c=c), f'{out}/{k}/{r}_{c}.png')
+                   for r in range(5) for c in range(10)]
+            with cf.ThreadPoolExecutor(16) as ex:
+                got += sum(len(x) for x in ex.map(lambda j: fetch(*j), sub) if x)
     print(f'downloaded {len(jobs)} files, {got / 1e6:.1f} MB in {time.time() - t0:.1f}s')
     if refresh:
         open(stamp, 'w').write(today)
