@@ -56,7 +56,22 @@ def mosaic(name, base=None):
         y0, x0 = r * 512, c * 512
         hh, ww = min(512, H - y0), min(512, W - x0)
         if hh > 0 and ww > 0: img[y0:y0 + hh, x0:x0 + ww] = t[:hh, :ww]
+    if base is None: img[dropouts(img), 3] = 0               # satellite layers only (not the static sst / dem)
     return img
+
+def dropouts(img, run=256):
+    """Scan-line dropouts in GIBS tiles: long horizontal runs (18+ degrees) of one identical colour. Real imagery
+    always varies; a missing swath arrives as a flat band (GOES sends pure white, which the IR scale reads as -92 C).
+    Not used on the EUMETSAT images, which are upsampled and legitimately flat in places."""
+    ok = img[..., 3] > 0
+    p = (img[..., 0].astype(np.int32) << 16) | (img[..., 1].astype(np.int32) << 8) | img[..., 2]
+    eq = np.zeros(ok.shape, bool); eq[:, 1:] = (p[:, 1:] == p[:, :-1]) & ok[:, 1:] & ok[:, :-1]
+    lab, n = ndimage.label(eq, structure=[[0, 0, 0], [1, 1, 1], [0, 0, 0]])
+    if n == 0: return np.zeros(ok.shape, bool)
+    big = np.bincount(lab.ravel()) >= run; big[0] = False
+    m = big[lab]; m[:, :-1] |= m[:, 1:]
+    if m.any(): log(f'   dropout band(s) masked: {m.sum()} px')
+    return m
 
 def invert(img, cm, nearest=True):
     keys, vals, pal = cm
@@ -130,8 +145,34 @@ MU0 = (N @ S).astype(np.float32)                         # cos solar zenith
 # ------------------------------------------------------------------ 1. infrared -> BT, blended
 cm_ir = load_cmap(f'{SD}/cmap_ir.xml')
 bt = {}
+def fill_specks(v, holes, max_px=64):
+    """Fill small no-data specks with the nearest valid value; large holes stay empty (other satellites cover)."""
+    lab, n = ndimage.label(holes)
+    if n == 0: return v
+    small = np.bincount(lab.ravel()) <= max_px; small[0] = False
+    sm = small[lab]
+    if not sm.any(): return v
+    _, (iy, ix) = ndimage.distance_transform_edt(~np.isfinite(v), return_indices=True)
+    out = v.copy(); out[sm] = v[iy[sm], ix[sm]]
+    return out
+def despike(v, size=5, tol=20.0):
+    """The GIBS tiles are downsampled with blending, which creates in-between colours; some of those happen to be
+    exact palette entries for a very different temperature (a blended warm grey that reads as -75 C). Such pixels
+    disagree with nearly all their neighbours: replace anything more than tol K from its 5x5 median."""
+    fin = np.isfinite(v)
+    med = ndimage.median_filter(np.where(fin, v, np.nanmedian(v)), size=size)
+    bad = fin & (np.abs(v - med) > tol)
+    out = v.copy(); out[bad] = med[bad]
+    return out, int(bad.sum())
 for k in ['goes_e', 'goes_w', 'hima']:
-    bt[k], ex = invert(mosaic(k), cm_ir); log(f'{k}: IR, exact colour {ex*100:.0f}%')
+    m = mosaic(k)
+    white = (m[..., 3] > 0) & (m[..., 0] == 255) & (m[..., 1] == 255) & (m[..., 2] == 255)
+    m[white, 3] = 0                                      # GIBS draws missing pixels pure white (= -92 C on the scale)
+    bt[k], ex = invert(m, cm_ir)
+    bt[k] = fill_specks(bt[k], white)
+    bt[k], nsp = despike(bt[k])
+    if nsp: log(f'   {k}: {nsp} colour-blend spikes repaired')
+    log(f'{k}: IR, exact colour {ex*100:.0f}%, white no-data px {white.sum()}')
 bt['mtg'] = fit_curve(grey('mtg'), bt['goes_e'], (lonA > -45) & (lonA < -15) & (np.abs(latA) < 50))
 bt['iodc'] = fit_curve(grey('iodc'), bt['mtg'], (lonA > 20) & (lonA < 35) & (np.abs(latA) < 45))
 num = np.zeros((H, W), np.float32); den = np.zeros((H, W), np.float32)
@@ -147,7 +188,15 @@ log(f'IR coverage {np.isfinite(BT).mean()*100:.0f}%')
 dem, _ = invert(mosaic('dem', SD), load_cmap(f'{SD}/cmap_dem.xml'), nearest=False)
 Z = np.nan_to_num(dem, nan=0.0).clip(0, 8000)
 sst, _ = invert(mosaic('sst', SD), load_cmap(f'{SD}/cmap_sst.xml'))
-SEA = np.isfinite(sst)
+SEA_ANY = np.isfinite(sst)
+# The SST analysis also covers lakes, reservoirs and rivers, and its 0.25-degree cells spill over coasts. Over
+# such pixels the satellite sees land (cold at night, bright by day), so judging them against water made
+# speckles of fake cloud all over the continents. Use the sea reference only on large water bodies (the Great
+# Lakes and up), away from the shore; everything else is judged as land.
+lab, n = ndimage.label(SEA_ANY)
+big = np.bincount(lab.ravel()) >= 400; big[0] = False
+SEA = ndimage.binary_erosion(big[lab], iterations=2)
+del lab
 log(f'elevation max {Z.max():.0f} m; sea-surface temperature on {SEA.mean()*100:.0f}% of grid')
 LAPSE = 0.0055                                           # K per m (surface skin, mid-day/night average)
 BTa = BT + LAPSE * Z                                     # "as if at sea level"
@@ -192,6 +241,7 @@ margin = np.where(SEA, 3.0, 6.0)                        # sea reference is far m
 ir = np.clip((deficit - margin) / 40.0, 0, 1)
 ir = np.maximum(ir, np.clip((-25 - BT) / 35, 0, 1))
 ir = ndimage.median_filter(np.nan_to_num(ir), size=3)
+
 log(f'water-vapour offset over sea by latitude: ' + ' '.join(f'{b}:{v:.1f}' for b, v in zip(band_lat[::3], dlat[::3])))
 
 # ------------------------------------------------------------------ 3. visible (daylight only)
@@ -234,20 +284,37 @@ vcl = ndimage.median_filter(np.nan_to_num(vcl), size=3)
 dayw = np.clip((MU0 - 0.25) / 0.2, 0, 1) * np.clip(vden / 1e-3, 0, 1)
 # don't let bright snow/ice or deserts masquerade as cloud: require at least slight IR coolness over land
 vcl = np.where(SEA, vcl, vcl * np.clip((deficit - 1.0) / 4.0, 0, 1))
-idx = np.maximum(ir, vcl * dayw)
-idx = np.clip((idx - 0.08) / 0.92, 0, 1)            # drop the faint residue left by reference-temperature error
-log(f'visible used on {(dayw > 0.5).mean()*100:.0f}% of the grid; low-cloud pixels added by visible: {((vcl * dayw > 0.3) & (ir < 0.1)).mean()*100:.1f}%')
+vlo = vcl * dayw
+log(f'visible used on {(dayw > 0.5).mean()*100:.0f}% of the grid; low-cloud pixels added by visible: {((vlo > 0.3) & (ir < 0.1)).mean()*100:.1f}%')
 
 # ------------------------------------------------------------------ 4. encode, fill the poles
-raw = np.where(idx > 0, 0.40 + 0.56 * idx ** 0.7, 0.38).astype(np.float32)
-raw = np.where(np.isfinite(BT), raw, np.nan)
+def enc(i):
+    """cloud index 0..1 -> stored grey (0.38 clear, 0.40..0.96 cloud); drops the faint residue below 0.08"""
+    i = np.clip((i - 0.08) / 0.92, 0, 1)
+    return np.where(i > 0, 0.40 + 0.56 * i ** 0.7, 0.38).astype(np.float32)
 old = np.array(Image.open(OLDMAP).convert('L').resize((W, H), Image.BILINEAR), np.float32) / 255
 wfill = np.clip(den / 1e-2, 0, 1)
-out = np.where(np.isfinite(raw), raw, old) * wfill + old * (1 - wfill)
-img = Image.fromarray((np.clip(out, 0, 1) * 255).astype(np.uint8))
+def fill(raw):
+    raw = np.where(np.isfinite(BT), raw, np.nan)
+    return np.maximum(np.where(np.isfinite(raw), raw, old) * wfill + old * (1 - wfill), 0.38)   # never darker than clear sky
+def L8(a): return Image.fromarray((np.clip(np.nan_to_num(a), 0, 1) * 255).astype(np.uint8))
+img = L8(fill(enc(np.maximum(ir, vlo))))                 # what the satellites see now (live map)
 img.resize((4096, 2048), Image.LANCZOS).save(f'{OUT}_4096.jpg', quality=90)
 img.resize((2048, 1024), Image.LANCZOS).save(f'{OUT}_2048.jpg', quality=90)
-img.resize((512, 256), Image.BOX).save(f'{OUT}_512.png')
+# Layers for the replay, which carries daylight-only low cloud through the night (run.py):
+#   _ir: infrared-only map (same at day and night, so it is also what motion is measured on)
+#   _lo: low cloud seen only in visible light (valid where _dw, the daylight weight, is high)
+iimg = L8(fill(enc(ir)))
+iimg.resize((4096, 2048), Image.LANCZOS).save(f'{OUT}_ir_4096.jpg', quality=90)
+iimg.resize((2048, 1024), Image.LANCZOS).save(f'{OUT}_ir_2048.jpg', quality=92)
+iimg.resize((512, 256), Image.BOX).save(f'{OUT}_512.png')
+lo = np.where(vlo > ir, vcl, 0) * wfill
+L8(lo).resize((4096, 2048), Image.BILINEAR).save(f'{OUT}_lo_4096.png', optimize=True)
+L8(lo).resize((2048, 1024), Image.BILINEAR).save(f'{OUT}_lo_2048.png', optimize=True)
+L8(dayw * wfill).resize((512, 256), Image.BOX).save(f'{OUT}_dw_512.png')
+import os
+if not os.path.exists(f'{SD}/sea_2048.png'):
+    L8(SEA.astype(np.float32)).resize((2048, 1024), Image.BOX).save(f'{SD}/sea_2048.png')
 # data layers for the other globe views
 # infrared: cloud-top / surface temperature, 0 = no data, 1..255 = -90..+50 C
 bt8 = np.where(np.isfinite(BT), 1 + np.clip((BT + 90) / 140 * 254, 0, 254), 0).astype(np.uint8)
@@ -255,9 +322,9 @@ bimg = Image.fromarray(bt8)
 bimg.resize((4096, 2048), Image.BILINEAR).save(f'{OUT}_bt_4096.jpg', quality=90)
 bimg.resize((2048, 1024), Image.BILINEAR).save(f'{OUT}_bt_2048.jpg', quality=90)
 # sea-surface temperature: 0 = land/ice/no data, 1..255 = -2..+35 C
-sst8 = np.where(SEA, 1 + np.clip((sst + 2) / 37 * 254, 0, 254), 0).astype(np.uint8)
+sst8 = np.where(SEA_ANY, 1 + np.clip((sst + 2) / 37 * 254, 0, 254), 0).astype(np.uint8)
 Image.fromarray(sst8).resize((2048, 1024), Image.NEAREST).save(f'{OUT}_sst_2048.png', optimize=True)
 # diagnostics
 def q(a): return Image.fromarray((np.clip(np.nan_to_num(a), 0, 1) * 255).astype(np.uint8)).resize((1280, 640))
-q(ir).save(f'{OUT}_dbg_ir.png'); q(vcl * dayw).save(f'{OUT}_dbg_vis.png')
+q(ir).save(f'{OUT}_dbg_ir.png'); q(vlo).save(f'{OUT}_dbg_vis.png')
 log('saved', f'{OUT}_4096.jpg')
