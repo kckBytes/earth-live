@@ -10,7 +10,8 @@ Published (site/):
   sst_2048.png                       sea-surface temperature: 0 = land/ice, 1..255 = -2..+35 C (daily)
   flow.png                           64x32 RG motion, deg/hour (R east, G north), 128 = still
   meta.json                          observation time etc.
-  storms.json                        active tropical cyclones with tracks (GDACS + NOAA NHC)
+  storms.json                        globe labels: cyclones, lows/highs, alerts, launches
+  wx.json + wx/<t>_a|b|c|w.png       weather layers from NOAA GFS (see weather.py)
   frames.json + frames/<t>_c.jpg, <t>_bt.jpg, <t>_f.png   replay: last 24 h, every 30 min, f = motion to next frame
 
 Replay frames sit on an exact 30-minute grid (all from the archives, so every satellite is at the same moment).
@@ -27,7 +28,7 @@ from scipy import ndimage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import fetch_slot, flow, storms
+import fetch_slot, flow, storms, weather
 
 WORK, SITE = sys.argv[1], sys.argv[2]
 BACKFILL = int(os.environ.get('BACKFILL', '12') or 12)
@@ -225,6 +226,10 @@ for a, b in zip(ft, ft[1:]):
 json.dump({'frames': [dict({'t': t, 'v': int(os.path.getmtime(f'{FR}/{t}_c.jpg') * 1000)}, **({'a': act[t]} if t in act else {}))
                       for t in ft], 'every_min': 30, 'kinds': ['c', 'bt'], 'activity_grid': [8, 4]},
           open(f'{SITE}/frames.json', 'w'))
+try:
+    weather.build(WORK, SITE)                                # Ventusky-style layers, only when a new model run is out
+except Exception as e:
+    print('weather failed:', e)
 try:
     json.dump(storms.fetch_all(cache_dir=WORK), open(f'{SITE}/storms.json', 'w'))
 except Exception as e:
