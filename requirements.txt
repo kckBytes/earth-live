@@ -4,3 +4,4 @@ scipy
 eccodes
 sgp4
 netCDF4
+opencv-python-headless

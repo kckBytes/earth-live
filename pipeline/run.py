@@ -197,6 +197,17 @@ for t in ft:
         dig = hashlib.md5(c8.tobytes()).hexdigest()           # rewrite only when it changed, so phones re-fetch only then
         if not os.path.exists(f'{FR}/{t}_c.jpg') or not os.path.exists(f'{FR}/{t}_c.md5') or open(f'{FR}/{t}_c.md5').read() != dig:
             Image.fromarray(c8).save(f'{FR}/{t}_c.jpg', quality=90); open(f'{FR}/{t}_c.md5', 'w').write(dig)
+# fine motion between consecutive published pictures, for the phone's in-between frames (dense optical flow on the
+# pictures people actually see; the 64x32 block motion above stays for the live drift and the night carry)
+ftp = [t for t in ft if newest - t <= PUB_H * H + 60e3]
+for a, b in zip(ftp, ftp[1:]):
+    dp = f'{FR}/{a}_d.png'
+    if os.path.exists(dp) and os.path.getmtime(dp) >= max(os.path.getmtime(f'{FR}/{a}_c.jpg'), os.path.getmtime(f'{FR}/{b}_c.jpg')):
+        continue
+    try:
+        Image.fromarray(flow.dense(f'{FR}/{a}_c.jpg', f'{FR}/{b}_c.jpg', (b - a) / H)).save(dp)
+    except Exception as e:
+        print('dense motion failed', a, e)
 # the live map gets the same carry, so the replay's last frame and the still globe agree
 if P is not None and ft and os.path.exists(f'{WORK}/last/layer_lo_4096.png') and os.path.exists(f'{WORK}/last/flow.png'):
     lt = meta.get('time', newest)
@@ -215,7 +226,7 @@ for f in glob.glob(f'{WORK}/last/*'):
 os.makedirs(f'{SITE}/frames', exist_ok=True)
 ft = [t for t in ft if ft[-1] - t <= PUB_H * H + 60e3]
 for t in ft:
-    for k in ('c.jpg', 'bt.jpg', 'f.png'):
+    for k in ('c.jpg', 'bt.jpg', 'f.png', 'd.png'):
         if os.path.exists(f'{FR}/{t}_{k}'): shutil.copy(f'{FR}/{t}_{k}', f'{SITE}/frames/{t}_{k}')
 # how much the clouds change from each frame to the next, on an 8 x 4 grid of the world (lon x lat, x1000):
 # the phone slows the replay down where the half of the Earth it shows is busy, and speeds through calm spells
@@ -223,7 +234,8 @@ act = {}
 for a, b in zip(ft, ft[1:]):
     d = np.abs(small(f'{FR}/{b}_s.png') - small(f'{FR}/{a}_s.png'))
     act[a] = [int(round(v * 1000)) for v in d.reshape(4, 64, 8, 64).mean(axis=(1, 3)).ravel()]
-json.dump({'frames': [dict({'t': t, 'v': int(os.path.getmtime(f'{FR}/{t}_c.jpg') * 1000)}, **({'a': act[t]} if t in act else {}))
+json.dump({'frames': [dict({'t': t, 'v': int(os.path.getmtime(f'{FR}/{t}_c.jpg') * 1000)}, **({'a': act[t]} if t in act else {}),
+                           **({'d': int(os.path.getmtime(f'{FR}/{t}_d.png') * 1000)} if os.path.exists(f'{FR}/{t}_d.png') else {}))
                       for t in ft], 'every_min': 30, 'kinds': ['c', 'bt'], 'activity_grid': [8, 4]},
           open(f'{SITE}/frames.json', 'w'))
 try:
