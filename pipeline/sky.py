@@ -121,6 +121,70 @@ def lightning(now, work):
     json.dump(hist, open(hist_p, 'w'))
     return [[int(k), a, b, n] for k, v in sorted(hist.items()) if ms(now) - int(k) <= 6.5 * 3600_000 for a, b, n in v]
 
+LAST30 = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=json'
+
+def orbit_track(l1, l2, now, step_min=2):
+    """Ground track of one orbit (a TLE pair, or an OMM record from CelesTrak's JSON as l1 with l2=None),
+    -24 h .. +12 h; returns (track, altitude km)."""
+    from sgp4.api import Satrec, jday
+    if l2 is None:
+        from sgp4 import omm
+        sat = Satrec(); omm.initialize(sat, l1)
+    else:
+        sat = Satrec.twoline2rv(l1, l2)
+    tr, alt = [], 0
+    for k in range(-24 * 60, 12 * 60 + 1, step_min):
+        t = now + timedelta(minutes=k)
+        jd, fr = jday(t.year, t.month, t.day, t.hour, t.minute, t.second + t.microsecond / 1e6)
+        e, r, _ = sat.sgp4(jd, fr)
+        if e: continue
+        d = jd + fr - 2451545.0
+        gmst = math.radians((280.46061837 + 360.98564736629 * d) % 360)
+        x = r[0] * math.cos(gmst) + r[1] * math.sin(gmst); y = -r[0] * math.sin(gmst) + r[1] * math.cos(gmst); z = r[2]
+        rr = math.sqrt(x * x + y * y + z * z); alt = rr - 6371
+        tr.append([ms(t), round(math.degrees(math.asin(z / rr)), 2), round(math.degrees(math.atan2(y, x)), 2)])
+    return tr, alt
+
+def launched(work, now):
+    """Recent launches (Launch Library 2, last ~10 days) and, once published, where what they carried is now.
+    A launch becomes 'available' when LL2 has given it an international designator (e.g. 2026-231) and CelesTrak
+    lists objects with it; the phone shows it only if its owner asked to track that launch (Settings > Requests)."""
+    ll = []
+    try: ll = json.load(open(f'{work}/launches.json'))['results']           # the storms step caches LL2 hourly
+    except Exception as e: print('launched: no launch cache', e)
+    tle, cache = {}, f'{work}/last30.json'
+    try:
+        if not os.path.exists(cache) or os.path.getsize(cache) < 100 or (now.timestamp() - os.path.getmtime(cache)) > 2 * 3600:
+            body = raw(LAST30, 60)                                              # CelesTrak asks for <= every 2 h
+            json.loads(body); open(cache, 'wb').write(body)
+        for g in json.load(open(cache)):                                        # OMM records, one per object
+            oid = g.get('OBJECT_ID', '')                                        # e.g. 2026-231A
+            if len(oid) >= 9: tle.setdefault(oid[:8], []).append((oid[8:], g.get('OBJECT_NAME', oid), g))
+    except Exception as e: print('launched: CelesTrak unavailable', e)
+    out, seen = [], set()
+    for L in ll:
+        try:
+            if L.get('id') in seen: continue
+            t = datetime.fromisoformat(L['net'].replace('Z', '+00:00'))
+            if not (now - timedelta(days=10) <= t <= now): continue
+            seen.add(L['id'])
+            st = ((L.get('status') or {}).get('abbrev') or '')
+            if st in ('Failure', 'TBD', 'TBC', 'Go', 'Hold'): continue
+            cospar = L.get('launch_designator') or None
+            rocket = ((L.get('rocket') or {}).get('configuration') or {}).get('name') or L.get('name', '').split('|')[0].strip()
+            mission = ((L.get('mission') or {}).get('name') or L.get('name', '').split('|')[-1]).strip()
+            o = {'id': L['id'], 'rocket': rocket, 'mission': mission, 'net': ms(t), 'status': st, 'cospar': cospar,
+                 'available': False}
+            objs = sorted(tle.get(cospar, []), key=lambda q: (len(q[0]), q[0])) if cospar else []
+            if objs:
+                tr, alt = orbit_track(objs[0][2], None, now)
+                if tr:
+                    o.update(available=True, objects=len(objs), lead=objs[0][1], alt_km=round(alt), track=tr)
+            out.append(o)
+        except Exception as e: print('launched: skipped', L.get('name'), e)
+    print('launched:', ', '.join(f"{o['mission']} ({'on orbit' if o['available'] else 'waiting'})" for o in out) or 'none')
+    return out
+
 def build(work, site, now=None):
     """sky.json (small, changes every run): cameras, fires, lightning of the last 6 h, aurora time.
     sats.json (bigger, the phone fetches it a few times a day): station tracks -24 h .. +12 h, one point a minute."""
@@ -137,6 +201,9 @@ def build(work, site, now=None):
     except Exception as e:
         st = []; print('sky: stations failed:', e)
     print(f"sky: {len(st)} orbits, {len(out['fires'])} fire areas, {len(out['lightning'])} lightning cells")
+    try:
+        json.dump({'generated': ms(now), 'launches': launched(work, now)}, open(f'{site}/launched.json', 'w'), separators=(',', ':'))
+    except Exception as e: print('sky: launched failed:', e)
 
 if __name__ == '__main__':
     os.makedirs('skytest', exist_ok=True); build('skytest', 'skytest')

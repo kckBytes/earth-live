@@ -277,7 +277,7 @@ def launches(now, cache):
             rocket = ((L.get('rocket') or {}).get('configuration') or {}).get('name') or L.get('name', '').split('|')[0].strip()
             mission = ((L.get('mission') or {}).get('name') or L.get('name', '').split('|')[-1]).strip()
             status = ((L.get('status') or {}).get('abbrev') or '')
-            out.append({'type': 'launch', 'name': rocket, 'kind': 'Launch', 'detail': mission[:28], 'status': status,
+            out.append({'type': 'launch', 'id': L.get('id'), 'mission': mission, 'name': rocket, 'kind': 'Launch', 'detail': mission[:28], 'status': status,
                         'from': ms(t - timedelta(hours=6)), 'until': ms(t + timedelta(minutes=90)), 'last_obs': ms(t),
                         'track': [[ms(t), round(lat, 3), round(lon, 3), 0]]})
         except Exception: continue
