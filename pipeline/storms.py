@@ -99,7 +99,8 @@ def fetch(now=None):
             if not n and now - to > timedelta(hours=12):              # no longer an active storm: its whole path stays
                 kind = f'{kind} · ended'                              # on the globe for a day and a half, standing still
                 until = last_t + 36 * 3600_000
-                pts = [q for q in pts if not q[3]] + [[until, pts[-1][1], pts[-1][2], 0]]
+                obs = [q for q in pts if not q[3]] or pts[:1]
+                pts = obs + [[until, obs[-1][1], obs[-1][2], 0]]
             out.append({'name': name, 'kind': kind, 'detail': detail, 'last_obs': last_obs, 'track': pts,
                         'from': pts[0][0] - 3 * 3600_000, 'until': until})
         except Exception as e:
