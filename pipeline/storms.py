@@ -102,7 +102,7 @@ def fetch(now=None):
                 obs = [q for q in pts if not q[3]] or pts[:1]
                 pts = obs + [[until, obs[-1][1], obs[-1][2], 0]]
             out.append({'name': name, 'kind': kind, 'detail': detail, 'last_obs': last_obs, 'track': pts,
-                        'from': pts[0][0] - 3 * 3600_000, 'until': until})
+                        'from': pts[0][0] - 3 * 3600_000, 'until': until, 'ended': kind.endswith('ended')})
         except Exception as e:
             print('storms: skipped', p.get('eventname'), e)
     print('storms:', ', '.join(f"{s['kind']} {s['name']} ({len(s['track'])} pts)" for s in out) or 'none active')
@@ -246,6 +246,7 @@ def events(now):
         caps[et] -= 1
         out.append({'type': {'EQ': 'quake', 'VO': 'volcano', 'WF': 'fire', 'FL': 'flood'}[et], 'name': name, 'kind': kind,
                     'detail': '', 'from': ms(t0), 'until': ms(until), 'last_obs': ms(t1),
+                    'ended': p.get('iscurrent') != 'true',                 # GDACS: no longer an ongoing event (drawn blue)
                     'track': [[ms(t0), round(lat, 2), round(lon, 2), 0]]})
     print('events:', ', '.join(f"{o['type']} {o['name']}" for o in out) or 'none')
     return out
