@@ -1,0 +1,8 @@
+{
+    "versionCode":  8,
+    "versionName":  "1.7",
+    "apk":  "https://raw.githubusercontent.com/kckBytes/earth-live/94910bbbefc27e2052d753faeb1eb5515d2d9971/Earth.apk",
+    "sha256":  "2f240ced8bbeba8da873dfc46d8044e59a440796dfc20c47305814eea2c225d8",
+    "notes":  "Replay: the day/night line glides back instead of jumping; on the lock screen the time stays under the globe.",
+    "published":  "2026-10-13T13:48:17Z"
+}
