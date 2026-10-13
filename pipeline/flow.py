@@ -96,3 +96,28 @@ def _blur(f):
     t = sum(k[d + 1] * np.roll(f, -d, axis=1) for d in (-1, 0, 1))
     pad = np.pad(t, ((1, 1), (0, 0)), mode='edge')
     return k[0] * pad[:-2] + k[1] * pad[1:-1] + k[2] * pad[2:]
+
+
+# ------------------------------------------------------------------ dense motion for the replay's in-between frames
+DW, DH = 512, 256                       # output grid: 0.7 deg cells (the block motion above is 5.6 deg)
+
+def dense(path_a, path_b, hours):
+    """Per-pixel cloud motion from picture a to the next picture b (DIS optical flow at 1024 x 512, the longitude seam
+    wrapped), averaged down to 512 x 256. Same encoding as estimate(): RG8 deg/hour east / north, 128 = still."""
+    import cv2
+    from PIL import Image
+    if not (0.15 <= hours <= 9):
+        return np.full((DH, DW, 3), 128, np.uint8)
+    W2, H2, PAD = 1024, 512, 96
+    a = np.asarray(Image.open(path_a).convert('L').resize((W2, H2), Image.BILINEAR))
+    b = np.asarray(Image.open(path_b).convert('L').resize((W2, H2), Image.BILINEAR))
+    wrap = lambda im: np.ascontiguousarray(np.concatenate([im[:, -PAD:], im, im[:, :PAD]], axis=1))
+    dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+    f = dis.calc(wrap(a), wrap(b), None)[:, PAD:PAD + W2]          # px from a to b: (dx east, dy down)
+    f = cv2.resize(np.ascontiguousarray(f), (DW, DH), interpolation=cv2.INTER_AREA)
+    ve = f[..., 0] * (360.0 / W2) / hours                          # deg/hour east
+    vn = -f[..., 1] * (180.0 / H2) / hours                         # deg/hour north
+    enc = lambda v: np.clip(np.round(128 + v / FLOW_MAX * 127), 1, 255).astype(np.uint8)
+    out = np.full((DH, DW, 3), 128, np.uint8)
+    out[..., 0], out[..., 1] = enc(ve), enc(vn)
+    return out
