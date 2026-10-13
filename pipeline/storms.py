@@ -94,9 +94,14 @@ def fetch(now=None):
                 kt = float(n.get('intensity') or 0)
                 cat = category(kt) if kind == 'Hurricane' else 0
                 detail = (f'Cat {cat} · ' if cat else '') + f'{round(kt * 1.15078 / 5) * 5:.0f} mph'
-            if not n and now - to > timedelta(hours=12): kind = f'{kind} · ended'   # no longer an active storm
+            last_t = max([last_obs] + [q[0] for q in pts if not q[3]])
+            until = last_t + 6 * 3600_000
+            if not n and now - to > timedelta(hours=12):              # no longer an active storm: its whole path stays
+                kind = f'{kind} · ended'                              # on the globe for a day and a half, standing still
+                until = last_t + 36 * 3600_000
+                pts = [q for q in pts if not q[3]] + [[until, pts[-1][1], pts[-1][2], 0]]
             out.append({'name': name, 'kind': kind, 'detail': detail, 'last_obs': last_obs, 'track': pts,
-                        'from': pts[0][0] - 3 * 3600_000, 'until': max(last_obs, max(q[0] for q in pts if not q[3]) if any(not q[3] for q in pts) else last_obs) + 6 * 3600_000})
+                        'from': pts[0][0] - 3 * 3600_000, 'until': until})
         except Exception as e:
             print('storms: skipped', p.get('eventname'), e)
     print('storms:', ', '.join(f"{s['kind']} {s['name']} ({len(s['track'])} pts)" for s in out) or 'none active')
