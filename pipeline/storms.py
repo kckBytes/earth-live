@@ -77,7 +77,9 @@ def fetch(now=None):
         p = ev.get('properties', {})
         try:
             to = datetime.fromisoformat(p['todate']).replace(tzinfo=timezone.utc)
-            if now - to > timedelta(hours=30) or p['eventid'] in seen: continue
+            # storms that ended in the last ~2 days stay in the file (the 24 h replay shows them where they were);
+            # 'until' below keeps them off the live globe once they're over
+            if now - to > timedelta(hours=54) or p['eventid'] in seen: continue
             seen.add(p['eventid'])
             name = p['eventname'].split('-')[0].strip().title()
             pts, last_obs, cls = track(ev, now)
@@ -92,7 +94,9 @@ def fetch(now=None):
                 kt = float(n.get('intensity') or 0)
                 cat = category(kt) if kind == 'Hurricane' else 0
                 detail = (f'Cat {cat} · ' if cat else '') + f'{round(kt * 1.15078 / 5) * 5:.0f} mph'
-            out.append({'name': name, 'kind': kind, 'detail': detail, 'last_obs': last_obs, 'track': pts})
+            if not n and now - to > timedelta(hours=12): kind = f'{kind} · ended'   # no longer an active storm
+            out.append({'name': name, 'kind': kind, 'detail': detail, 'last_obs': last_obs, 'track': pts,
+                        'from': pts[0][0] - 3 * 3600_000, 'until': max(last_obs, max(q[0] for q in pts if not q[3]) if any(not q[3] for q in pts) else last_obs) + 6 * 3600_000})
         except Exception as e:
             print('storms: skipped', p.get('eventname'), e)
     print('storms:', ', '.join(f"{s['kind']} {s['name']} ({len(s['track'])} pts)" for s in out) or 'none active')
