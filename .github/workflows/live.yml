@@ -56,3 +56,21 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+  # GitHub's own schedule fires only every few hours, so each run starts the next one ~10 minutes after it began
+  # (workflow_dispatch with the run's own token is allowed to start a run). The schedule above stays as the backstop
+  # that restarts the chain if it ever breaks. To stop it all: Actions > live clouds > ... > Disable workflow.
+  next:
+    needs: [build, deploy]
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: wait, then start the next run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          started=$(gh run view ${{ github.run_id }} -R ${{ github.repository }} --json createdAt -q .createdAt)
+          left=$(( 600 - ( $(date +%s) - $(date -d "$started" +%s) ) ))
+          if [ "$left" -gt 0 ]; then echo "next run in ${left}s"; sleep "$left"; fi
+          gh workflow run live.yml -R ${{ github.repository }} --ref main
