@@ -105,8 +105,43 @@ def fetch(now=None):
                         'from': pts[0][0] - 3 * 3600_000, 'until': until, 'ended': kind.endswith('ended')})
         except Exception as e:
             print('storms: skipped', p.get('eventname'), e)
+    # NHC storms GDACS doesn't list (it can lag a new storm by days, or drop one): their track from NHC's own best-track
+    # file, plus the latest advisory position. And a storm NHC still advises on never expires early.
+    have = {s['name'].lower(): s for s in out}
+    for key, n in nhc.items():
+        try:
+            lat, lon = float(n['latitudeNumeric']), float(n['longitudeNumeric'])
+            t_adv = datetime.fromisoformat(n['lastUpdate'].replace('Z', '+00:00'))
+            if key in have:
+                s = have[key]; s['until'] = max(s.get('until', 0), ms(now + timedelta(hours=6))); continue
+            pts = nhc_track(n.get('id', ''))
+            if not pts or pts[-1][0] < ms(t_adv) - 1800_000: pts.append([ms(t_adv), round(lat, 2), round(lon, 2), 0])
+            kind = NHC_KIND.get(n.get('classification', ''), 'Tropical storm')
+            if kind == 'Hurricane': kind = strong_name(lat, lon)
+            kt = float(n.get('intensity') or 0)
+            cat = category(kt) if kind == 'Hurricane' else 0
+            out.append({'name': n['name'], 'kind': kind, 'detail': (f'Cat {cat} · ' if cat else '') + f'{round(kt * 1.15078 / 5) * 5:.0f} mph',
+                        'last_obs': pts[-1][0], 'track': pts, 'from': pts[0][0] - 3 * 3600_000,
+                        'until': ms(now + timedelta(hours=6)), 'ended': False})
+        except Exception as e:
+            print('storms: NHC', key, 'skipped', e)
     print('storms:', ', '.join(f"{s['kind']} {s['name']} ({len(s['track'])} pts)" for s in out) or 'none active')
     return {'generated': ms(now), 'storms': out}
+
+def nhc_track(sid):
+    """Best-track positions (6-hourly) from NHC's ATCF b-deck, e.g. ep212026 -> btk/bep212026.dat."""
+    if not sid: return []
+    with urllib.request.urlopen(urllib.request.Request(f'https://ftp.nhc.noaa.gov/atcf/btk/b{sid.lower()}.dat', headers=UA), timeout=30) as r:
+        rows = r.read().decode('utf-8', 'replace').splitlines()
+    pts = {}
+    for row in rows:
+        c = [x.strip() for x in row.split(',')]
+        if len(c) < 8 or not c[2].isdigit(): continue
+        t = datetime.strptime(c[2], '%Y%m%d%H').replace(tzinfo=timezone.utc)
+        la = int(c[6][:-1]) / 10 * (1 if c[6].endswith('N') else -1)
+        lo = int(c[7][:-1]) / 10 * (1 if c[7].endswith('E') else -1)
+        pts[ms(t)] = [ms(t), la, lo, 0]                                  # several rows per time (wind radii): keep one
+    return [pts[k] for k in sorted(pts)]
 
 if __name__ == '__main__':
     print(json.dumps(fetch(), indent=1)[:2000])
