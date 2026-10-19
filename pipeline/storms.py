@@ -8,7 +8,8 @@ import json, re, urllib.request
 from datetime import datetime, timedelta, timezone
 
 UA = {'User-Agent': 'earth-live (https://github.com/kckBytes/earth-live)'}
-GDACS = 'https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=TC&fromDate={a}&toDate={b}'
+# every alert level: without it GDACS returns only Orange/Red, and weaker (Green) storms never showed up
+GDACS = 'https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=TC&alertlevel=Green;Orange;Red&fromDate={a}&toDate={b}'
 NHC = 'https://www.nhc.noaa.gov/CurrentStorms.json'
 NHC_KIND = {'HU': 'Hurricane', 'TS': 'Tropical storm', 'TD': 'Tropical depression', 'STS': 'Subtropical storm',
             'STD': 'Subtropical depression', 'PTC': 'Post-tropical', 'PC': 'Potential cyclone', 'TY': 'Typhoon'}
@@ -95,8 +96,12 @@ def fetch(now=None):
                 cat = category(kt) if kind == 'Hurricane' else 0
                 detail = (f'Cat {cat} · ' if cat else '') + f'{round(kt * 1.15078 / 5) * 5:.0f} mph'
             last_t = max([last_obs] + [q[0] for q in pts if not q[3]])
-            until = last_t + 6 * 3600_000
-            if not n and now - to > timedelta(hours=12):              # no longer an active storm: its whole path stays
+            # still active: stays on the globe while GDACS keeps listing it. Its reports land hours after the fix
+            # (West Pacific often 6-12 h), so "6 h after the last fix" alone hid live storms between reports.
+            until = max(last_t + 6 * 3600_000, ms(now + timedelta(hours=6)))
+            # over when GDACS says it's no longer current (its reports can trail by 12+ h, so the age alone misjudged
+            # live storms), or after 30 h with no report at all
+            if not n and (p.get('iscurrent') != 'true' or now - to > timedelta(hours=30)):  # its whole path stays
                 kind = f'{kind} · ended'                              # on the globe for a day and a half, standing still
                 until = last_t + 36 * 3600_000
                 obs = [q for q in pts if not q[3]] or pts[:1]
@@ -113,7 +118,12 @@ def fetch(now=None):
             lat, lon = float(n['latitudeNumeric']), float(n['longitudeNumeric'])
             t_adv = datetime.fromisoformat(n['lastUpdate'].replace('Z', '+00:00'))
             if key in have:
-                s = have[key]; s['until'] = max(s.get('until', 0), ms(now + timedelta(hours=6))); continue
+                s = have[key]; s['until'] = max(s.get('until', 0), ms(now + timedelta(hours=6)))
+                ta, obs = ms(t_adv), [q for q in s['track'] if not q[3]]
+                if obs and ta > obs[-1][0] + 1800_000:                 # NHC's advisory is newer than GDACS's last fix
+                    s['track'] = obs + [[ta, round(lat, 2), round(lon, 2), 0]] + [q for q in s['track'] if q[3] and q[0] > ta]
+                    s['last_obs'] = ta
+                continue
             pts = nhc_track(n.get('id', ''))
             if not pts or pts[-1][0] < ms(t_adv) - 1800_000: pts.append([ms(t_adv), round(lat, 2), round(lon, 2), 0])
             kind = NHC_KIND.get(n.get('classification', ''), 'Tropical storm')
