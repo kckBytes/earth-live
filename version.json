@@ -1,0 +1,8 @@
+{
+    "versionCode":  9,
+    "versionName":  "1.8",
+    "apk":  "https://raw.githubusercontent.com/kckBytes/earth-live/0157f6fadaa59d3b4d5d27c605d3cf920210412d/Earth.apk",
+    "sha256":  "094904e75ee24f1dc64fd0ad3e4b3bae04bf03e5ac87875813f8da9d0869e9a3",
+    "notes":  "Labels: satellites are back. Up to 64 labels; ended ones free their spot and a label left out comes back when another ends. Satellites stay, then events newest first, highs/lows last.",
+    "published":  "2026-10-22T05:49:44Z"
+}
