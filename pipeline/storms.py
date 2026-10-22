@@ -201,11 +201,13 @@ def extrema(v):
     try: low_ground = orography() < 800
     except Exception: low_ground = ~((lat > 25) & (lat < 45) & (lon > 70) & (lon < 105)) & (np.abs(lat) < 60)
     mean = ndimage.uniform_filter(v, size=(21, 21), mode=('nearest', 'wrap'))
-    lo = (v == ndimage.minimum_filter(v, size=(15, 15), mode=('nearest', 'wrap'))) & (v < 1000) & (mean - v > 6) \
+    # lows: every closed low 10+ hPa below its surroundings (a real, swirling system), whatever its absolute
+    # pressure and however many there are. A count per hemisphere left visible swirls unnamed.
+    lo = (v == ndimage.minimum_filter(v, size=(15, 15), mode=('nearest', 'wrap'))) & (mean - v > 10) \
          & (np.abs(lat) < 72) & low_ground
     hi = (v == ndimage.maximum_filter(v, size=(15, 15), mode=('nearest', 'wrap'))) & (v > 1026) & (np.abs(lat) < 65) & low_ground
     out = []
-    for kind, m, cap in (('L', lo, (4, 3)), ('H', hi, (2, 2))):
+    for kind, m, cap in (('L', lo, (99, 99)), ('H', hi, (2, 2))):
         pts = [(kind, float(lat[y, x]), float(lon[y, x]), float(v[y, x]), abs(float(mean[y, x] - v[y, x]))) for y, x in zip(*np.where(m))]
         pts.sort(key=lambda q: -q[4])
         out += [q[:4] for q in pts if q[1] >= 0][:cap[0]] + [q[:4] for q in pts if q[1] < 0][:cap[1]]
