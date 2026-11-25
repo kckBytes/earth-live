@@ -73,4 +73,10 @@ jobs:
           started=$(gh run view ${{ github.run_id }} -R ${{ github.repository }} --json createdAt -q .createdAt)
           left=$(( 600 - ( $(date +%s) - $(date -d "$started" +%s) ) ))
           if [ "$left" -gt 0 ]; then echo "next run in ${left}s"; sleep "$left"; fi
-          gh workflow run live.yml -R ${{ github.repository }} --ref main
+          # one failed call used to end the loop for hours (GitHub's API answers HTTP 500 now and then):
+          # retry for ~20 min before giving up to the schedule backstop
+          for wait in 10 20 30 60 60 120 120 180 300 300; do
+            gh workflow run live.yml -R ${{ github.repository }} --ref main && exit 0
+            echo "start failed, trying again in ${wait}s"; sleep "$wait"
+          done
+          exit 1
