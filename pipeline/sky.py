@@ -25,13 +25,51 @@ def raw(url, timeout=60):
 
 def ms(t): return int(t.timestamp() * 1000)
 
-def stations(now):
+# Orbital elements change a few times a day, and a set several days old still places a station within tens of
+# km (invisible on a globe). CelesTrak asks for each object at most every 2 h and blocks clients that ask more
+# often: fetching on every 10-min run got us 503s and timeouts from mid-November, and each failure published
+# an empty list. So: keep the last good elements in the run state, refresh them every 6 h (a failed attempt is
+# retried after 1 h, not every run), with a second free source, and use the saved copy for up to a week.
+TLE_REFRESH, TLE_RETRY, TLE_KEEP = 6 * 3600, 3600, 7 * 86400
+TLE_SOURCES = [
+    ('celestrak', lambda cat: f'https://celestrak.org/NORAD/elements/gp.php?CATNR={cat}&FORMAT=TLE',
+     lambda b: [x.strip() for x in b.decode().splitlines() if x.strip().startswith(('1 ', '2 '))][:2]),
+    ('ivanstanojevic', lambda cat: f'https://tle.ivanstanojevic.me/api/tle/{cat}',
+     lambda b: [json.loads(b)['line1'].strip(), json.loads(b)['line2'].strip()]),
+]
+
+def elements(work, cat, now):
+    """(line1, line2) for a catalogue number: the saved copy, refreshed from the sources when it's due."""
+    path, tried = f'{work}/tle_{cat}.txt', f'{work}/tle_{cat}.tried'
+    t = now.timestamp()
+    have, age = None, float('inf')
+    if os.path.exists(path):
+        l = open(path).read().split('\n')
+        if len(l) >= 2 and l[0].startswith('1 ') and l[1].startswith('2 '):
+            have, age = (l[0], l[1]), t - os.path.getmtime(path)
+    last_try = os.path.getmtime(tried) if os.path.exists(tried) else 0
+    if age > TLE_REFRESH and t - last_try > TLE_RETRY:
+        open(tried, 'w').close()
+        for host, url, parse in TLE_SOURCES:
+            try:
+                l1, l2 = parse(raw(url(cat), 30))
+                if not (l1.startswith('1 ') and l2.startswith('2 ')): raise ValueError('not a TLE')
+                open(path, 'w').write(l1 + '\n' + l2)
+                return l1, l2
+            except Exception as e:
+                print('sky: elements for', cat, 'from', host, 'failed:', e)
+    if have and age <= TLE_KEEP:
+        if age > TLE_REFRESH: print(f'sky: using saved elements for {cat}, {age / 3600:.0f} h old')
+        return have
+    raise RuntimeError('no elements (none saved, sources unavailable)')
+
+def stations(now, work='.'):
     from sgp4.api import Satrec, jday
     out = []
     for cat, name, kind in STATIONS:
         try:
-            l = [x.strip() for x in raw(f'https://celestrak.org/NORAD/elements/gp.php?CATNR={cat}&FORMAT=TLE', 30).decode().splitlines() if x.strip()]
-            sat = Satrec.twoline2rv(l[1], l[2])
+            l1, l2 = elements(work, cat, now)
+            sat = Satrec.twoline2rv(l1, l2)
             tr, alt = [], 0
             for k in range(-24 * 60, 12 * 60 + 1):                     # every minute, -24 h .. +12 h
                 t = now + timedelta(minutes=k)
@@ -196,8 +234,9 @@ def build(work, site, now=None):
         except Exception as e: print('sky:', name, 'failed:', e)
     json.dump(out, open(f'{site}/sky.json', 'w'), separators=(',', ':'))
     try:
-        st = stations(now)
-        json.dump({'generated': ms(now), 'sats': st}, open(f'{site}/sats.json', 'w'), separators=(',', ':'))
+        st = stations(now, work)
+        # never publish an empty list: without sats.json the phones keep the tracks they have (12 h ahead)
+        if st: json.dump({'generated': ms(now), 'sats': st}, open(f'{site}/sats.json', 'w'), separators=(',', ':'))
     except Exception as e:
         st = []; print('sky: stations failed:', e)
     print(f"sky: {len(st)} orbits, {len(out['fires'])} fire areas, {len(out['lightning'])} lightning cells")
